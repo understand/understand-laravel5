@@ -1,58 +1,53 @@
-<?php namespace Understand\UnderstandLaravel5;
+<?php
 
+namespace Understand\UnderstandLaravel5;
+
+use Exception;
 use Illuminate\Foundation\AliasLoader;
 use Illuminate\Support\Str;
-use Illuminate\Foundation\Application;
-use Exception;
-use Throwable;
+use Understand\UnderstandLaravel5\Handlers\MonologHandler;
+use UnderstandMonolog\Handler\UnderstandAsyncHandler;
+use UnderstandMonolog\Handler\UnderstandSyncHandler;
 
-class UnderstandLaravel5ServiceProvider extends UnderstandServiceProvider
+class UnderstandLumenServiceProvider extends UnderstandServiceProvider
 {
+    /**
+     * Bootstrap the application events.
+     *
+     * @return void
+     */
+    public function boot()
+    {
+        $this->app->configure('understand-laravel');
 
-	/**
-	 * Indicates if loading of the provider is deferred.
-	 *
-	 * @var bool
-	 */
-	protected $defer = false;
-
-	/**
-	 * Bootstrap the application events.
-	 *
-	 * @return void
-	 */
-	public function boot()
-	{
-        $configPath = __DIR__ . '/../../config/understand-laravel.php';
-        $this->publishes([$configPath => config_path('understand-laravel.php')], 'config');
         $enabled = $this->app['config']->get('understand-laravel.enabled');
 
         if ($enabled)
         {
-            $this->listenLaravelEvents();
+            $this->listenLumenEvents();
         }
 
         if ($enabled && $this->app['config']->get('understand-laravel.sql_enabled'))
         {
             $this->listenQueryEvents();
         }
-	}
+    }
 
-	/**
-	 * Register the service provider.
-	 *
-	 * @return void
-	 */
-	public function register()
-	{
-		$this->registerConfig();
+    /**
+     * Register bindings in the container.
+     *
+     * @return void
+     */
+    public function register()
+    {
+        $this->registerConfig();
         $this->registerFieldProvider();
         $this->registerDataCollector();
         $this->registerTokenProvider();
         $this->registerLogger();
         $this->registerExceptionEncoder();
         $this->registerEventLoggers();
-	}
+    }
 
     /**
      * Register field provider
@@ -70,7 +65,12 @@ class UnderstandLaravel5ServiceProvider extends UnderstandServiceProvider
                 $fieldProvider->setSessionStore($app['session.store']);
             }
 
-            $fieldProvider->setRouter($app['router']);
+            // router is available only from Lumen 5.5
+            if (array_has($app->availableBindings, 'router'))
+            {
+                $fieldProvider->setRouter($app['router']);
+            }
+
             $fieldProvider->setRequest($app['request']);
             $fieldProvider->setEnvironment($app->environment());
             $fieldProvider->setTokenProvider($app['understand.tokenProvider']);
@@ -80,11 +80,10 @@ class UnderstandLaravel5ServiceProvider extends UnderstandServiceProvider
             return $fieldProvider;
         });
 
-        $this->app->booting(function()
+        if (! class_exists('UnderstandFieldProvider'))
         {
-            $loader = AliasLoader::getInstance();
-            $loader->alias('UnderstandFieldProvider', 'Understand\UnderstandLaravel5\Facades\UnderstandFieldProvider');
-        });
+            class_alias('Understand\UnderstandLaravel5\Facades\UnderstandFieldProvider', 'UnderstandFieldProvider');
+        }
     }
 
     /**
@@ -96,11 +95,10 @@ class UnderstandLaravel5ServiceProvider extends UnderstandServiceProvider
     {
         parent::registerEventLoggers();
 
-        $this->app->booting(function()
+        if (! class_exists('UnderstandExceptionLogger'))
         {
-            $loader = AliasLoader::getInstance();
-            $loader->alias('UnderstandExceptionLogger', 'Understand\UnderstandLaravel5\Facades\UnderstandExceptionLogger');
-        });
+            class_alias('Understand\UnderstandLaravel5\Facades\UnderstandExceptionLogger', 'UnderstandExceptionLogger');
+        }
     }
 
     /**
@@ -112,72 +110,82 @@ class UnderstandLaravel5ServiceProvider extends UnderstandServiceProvider
     {
         parent::registerLogger();
 
-        $this->app->booting(function()
+        if (! class_exists('UnderstandLogger'))
         {
-            $loader = AliasLoader::getInstance();
-            $loader->alias('UnderstandLogger', 'Understand\UnderstandLaravel5\Facades\UnderstandLogger');
-        });
+            class_alias('Understand\UnderstandLaravel5\Facades\UnderstandLogger', 'UnderstandLogger');
+        }
     }
-    
+
     /**
-     * Detect Laravel version
-     * 
+     * Register monolog handler
+     *
+     * @return void
+     */
+    protected function registerMonologHandler()
+    {
+        $this->app['Psr\Log\LoggerInterface']->pushHandler(new MonologHandler());
+    }
+
+    /**
+     * Detect Lumen version
+     *
      * @param array $versions
      * @return type
      */
-    protected function detectLaravelVersion(array $versions)
+    protected function detectLumenVersion(array $versions)
     {
-        return Str::startsWith(Application::VERSION, $versions);
+        $re = '/Lumen \((.*)\) \(.*\)/m';
+
+        $version = $this->app->version();
+
+        preg_match($re, $version, $matches);
+
+        return Str::startsWith($matches[1], $versions);
     }
-    
+
     /**
      * Listen Laravel logs and queue events
      *
      * @return void
      */
-    protected function listenLaravelEvents()
+    protected function listenLumenEvents()
     {
-        // only Laravel versions below L5.4 supports `illuminate.log`
-        if ($this->detectLaravelVersion(['5.0', '5.1', '5.2', '5.3']))
+        // Lumen < 5.6 uses Monolog, so we need to manually raise event
+        if ($this->detectLumenVersion(['5.0', '5.1', '5.2', '5.3', '5.4', '5.5']))
         {
-            $this->app['events']->listen('illuminate.log', function($level, $message, $context)
+            $this->registerMonologHandler();
+
+            // the illuminate.log event is raised
+            // by our MonologHandler, not by Lumen
+            $this->app['events']->listen('illuminate.log', function ($log)
             {
-                $this->handleEvent($level, $message, $context);
+                $this->handleEvent($log['level'], $log['message'], $log['context']);
             });
         }
         else
         {
-            // starting from L5.4 MessageLogged event class was introduced
-            // https://github.com/laravel/framework/commit/57c82d095c356a0fe0f9381536afec768cdcc072
-            $this->app['events']->listen('Illuminate\Log\Events\MessageLogged', function($log) 
+            // starting from Lumen 5.6 MessageLogged event class was introduced
+            $this->app['events']->listen('Illuminate\Log\Events\MessageLogged', function ($log)
             {
-
                 $this->handleEvent($log->level, $log->message, $log->context);
             });
         }
 
         // starting from L5.2 JobProcessing event class was introduced
         // https://github.com/illuminate/queue/commit/ce2b5518902b1bcb9ef650c41900fc8c6392eb0c
-        if ($this->app->runningInConsole())
-        {
-            if ($this->detectLaravelVersion(['5.0', '5.1']))
-            {
-                $this->app['events']->listen('illuminate.queue.after', function()
-                {
+        if ($this->app->runningInConsole()) {
+            if ($this->detectLumenVersion(['5.0', '5.1'])) {
+                $this->app['events']->listen('illuminate.queue.after', function () {
                     $this->app['understand.tokenProvider']->generate();
                     $this->app['understand.dataCollector']->reset();
                 });
 
-                $this->app['events']->listen('illuminate.queue.failed', function()
-                {
+                $this->app['events']->listen('illuminate.queue.failed', function () {
                     $this->app['understand.tokenProvider']->generate();
                     $this->app['understand.dataCollector']->reset();
                 });
-            }
-            else
-            {
-                $this->app['events']->listen('Illuminate\Queue\Events\JobProcessing', function()
-                {
+            } else {
+                $this->app['events']->listen('Illuminate\Queue\Events\JobProcessing', function () {
                     $this->app['understand.tokenProvider']->generate();
                     $this->app['understand.dataCollector']->reset();
                 });
@@ -192,10 +200,9 @@ class UnderstandLaravel5ServiceProvider extends UnderstandServiceProvider
      */
     protected function listenQueryEvents()
     {
-        // only Laravel versions below L5.2 supports `illuminate.query`
-        if ($this->detectLaravelVersion(['5.0', '5.1']))
+        // only Lumen versions below L5.2 supports `illuminate.query`
+        if ($this->detectLumenVersion(['5.0', '5.1']))
         {
-            // $this->events->fire('illuminate.query', [$query, $bindings, $time, $this->getName()]);
             $this->app['events']->listen('illuminate.query', function($query, $bindings, $time)
             {
                 $this->app['understand.dataCollector']->setInArray('sql_queries', [
@@ -221,7 +228,7 @@ class UnderstandLaravel5ServiceProvider extends UnderstandServiceProvider
 
     /**
      * Handle a new log event
-     * 
+     *
      * @param string $level
      * @param mixed $message
      * @param array $context
@@ -240,8 +247,7 @@ class UnderstandLaravel5ServiceProvider extends UnderstandServiceProvider
             $this->app['understand.eventLogger']->logEvent($level, $message, $context);
         }
         // `\Log::notice`, `\Log::warning`, `\Log::error`, `\Log::critical`, `\Log::alert`, `\Log::emergency` and `\Exception`, `\Throwable`
-        // '5.5', '5.6', '5.7', '5.8'
-        else if ( ! $this->detectLaravelVersion(['5.0', '5.1', '5.2', '5.3', '5.4']) && isset($context['exception']) && ($context['exception'] instanceof Exception || $context['exception'] instanceof Throwable))
+        else if (isset($context['exception']) && ($context['exception'] instanceof Exception || $context['exception'] instanceof Throwable))
         {
             $exception = $context['exception'];
             unset($context['exception']);

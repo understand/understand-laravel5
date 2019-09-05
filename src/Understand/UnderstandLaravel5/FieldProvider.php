@@ -102,7 +102,7 @@ class FieldProvider
     /**
      * @param Application $app
      */
-    public function setApp(Application $app)
+    public function setApp($app)
     {
         $this->app = $app;
     }
@@ -122,7 +122,7 @@ class FieldProvider
      *
      * @param Router $router
      */
-    public function setRouter(Router $router)
+    public function setRouter($router)
     {
         $this->router = $router;
     }
@@ -246,11 +246,37 @@ class FieldProvider
     }
 
     /**
+     * Detect if the application is Laravel or Lumen
+     *
+     * @return bool
+     */
+    protected function isLaravel()
+    {
+        return $this->app instanceof Application;
+    }
+
+    /**
+     * Get Laravel/Lumen version
+     *
      * @return string
      */
     protected function getLaravelVersion()
     {
-        return Application::VERSION;
+        if ($this->isLaravel())
+        {
+            // Laravel
+            return Application::VERSION;
+        }
+        else
+        {
+            $re = '/Lumen \((.*)\) \(.*\)/m';
+
+            $version = $this->app->version();
+
+            preg_match($re, $version, $matches);
+
+            return $matches[1];
+        }
     }
 
     /**

@@ -1,4 +1,4 @@
-## Laravel 5 service provider for Understand.io
+## Laravel/Lumen 5 service provider for Understand.io
 
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/understand/understand-laravel5.svg?style=flat-square)](https://packagist.org/packages/understand/understand-laravel5)
 [![Quality Score](https://img.shields.io/scrutinizer/g/understand/understand-laravel5.svg?style=flat-square)](https://scrutinizer-ci.com/g/understand/understand-laravel5)
@@ -6,9 +6,9 @@
 
 ### Introduction
 
-This packages provides a full abstraction for Understand.io and provides extra features to improve Laravel's default logging capabilities. It is essentially a wrapper around Laravel's event handler to take full advantage of Understand.io's data aggregation and analysis capabilities.
+This packages provides a full abstraction for Understand.io and provides extra features to improve Laravel/Lumen's default logging capabilities. It is essentially a wrapper around Laravel's event handler to take full advantage of Understand.io's data aggregation and analysis capabilities.
 
-### Quick start
+### Quick start (Laravel)
 
 1. Add the package to your project
     
@@ -36,8 +36,36 @@ UNDERSTAND_TOKEN=your-input-token-from-understand-io
 \Log::error('Understand.io test error');
 ```
 
+### Quick start (Lumen)
+
+1. Add the package to your project
+    
+```
+composer require understand/understand-laravel5
+```
+
+2. Register the ServiceProvider in `bootstrap/app.php`
+  
+```php
+ $app->register(\Understand\UnderstandLaravel5\UnderstandLumenServiceProvider::class);
+```
+
+3. Set your Understand.io input token in your `.env` file
+  
+```php
+UNDERSTAND_ENABLED=true
+UNDERSTAND_TOKEN=your-input-token-from-understand-io
+```
+
+4. Send your first error
+
+```php 
+// anywhere inside your Laravel app
+\Log::error('Understand.io test error');
+```
+
 - We recommend that you make use of a async handler - [How to send data asynchronously](#how-to-send-data-asynchronously)  
-- If you are using Laravel 5.0 (`>= 5.0, < 5.1`) version, please read about - [How to report Laravel 5.0 exceptions](#how-to-report-laravel-50--50--51-exceptions).
+- If you are using Laravel 5.0 (`>= 5.0, < 5.1`) or Lumen (`>= 5.1, < 5.6`) versions, please read about - [How to report Laravel 5.0 (>= 5.0, < 5.1) / Lumen (>= 5.1, < 5.6) exceptions](#how-to-report-laravel-50--50--51--lumen--51--56-exceptions).
 - For advanced configuration please read about - [Advanced configuration](#advanced-configuration)
 
 
@@ -49,7 +77,7 @@ By default, Laravel automatically stores its [logs](http://laravel.com/docs/erro
 ```php 
 \Log::info('my message', ['my_custom_field' => 'my data']);
 ```
-#### PHP/Laravel exceptions
+#### PHP/Laravel/Lumen exceptions
 By default, all errors and exceptions with code fragments and stack traces will be sent to Understand.io. 
 
 The following extra information will be collected:
@@ -92,9 +120,9 @@ If you see instructions on how to use CURL then your system has the CURL binary 
 
 > Keep in mind that Laravel allows you to specify different configuration values in different environments. You could, for example, use the async handler in production and the sync handler in development.
 
-### How to report Laravel 5.0 (`>= 5.0, < 5.1`) exceptions 
+### How to report Laravel 5.0 (`>= 5.0, < 5.1`) / Lumen (`>= 5.1, < 5.6`) exceptions 
 
-Laravel's (`>= 5.0, < 5.1`) exception logger doesn't use event dispatcher (https://github.com/laravel/framework/pull/10922) and that's why you need to add the following line to your `Handler.php` file (otherwise Laravel's exceptions will not be sent Understand.io).
+Laravel's (`>= 5.0, < 5.1`) and Lumen (`>= 5.1, < 5.6`) exception logger doesn't use event dispatcher (https://github.com/laravel/framework/pull/10922) and that's why you need to add the following line to your `Handler.php` file (otherwise Laravel's exceptions will not be sent Understand.io).
 
 - Open `app/Exceptions/Handler.php` and put this line `\UnderstandExceptionLogger::log($e)` inside `report` method.
   
